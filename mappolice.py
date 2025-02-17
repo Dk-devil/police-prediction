@@ -12,13 +12,13 @@ with open('police_prediction_model.pkl', 'rb') as file:
     model = pickle.load(file)
 
 # Streamlit App
-st.set_page_config(page_title="Police Requirement Prediction", page_icon="💓", layout="centered")
+st.set_page_config(page_title="Police Requirement Prediction", layout="centered")
 
 st.title("Police Requirement Prediction App")
 st.markdown("#### Estimate the number of policemen needed based on area, gates, population, and security risk.")
 
 # Map for area selection
-st.subheader("📍 Select Area on Map")
+st.subheader("Select Area on Map")
 st.write("Draw a polygon to calculate the area in square meters.")
 
 m = folium.Map(location=[13.0827, 80.2707], zoom_start=15)
@@ -45,7 +45,7 @@ if map_data and map_data['last_active_drawing']:
     gdf = gpd.GeoDataFrame(index=[0], geometry=[polygon], crs="EPSG:4326")
     gdf = gdf.to_crs(epsg=3857)
     area_sq_m = gdf.geometry.area.iloc[0]
-    st.success(f"🏠 Area Selected: {area_sq_m:.2f} square meters")
+    st.success(f"Area Selected: {area_sq_m:.2f} square meters")
 
 # User Input Fields
 no_of_gates = st.number_input("Enter Number of Gates", min_value=0, step=1, format="%d")
