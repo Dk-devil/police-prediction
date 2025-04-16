@@ -1,43 +1,34 @@
-import streamlit as st
-import pickle
+﻿import streamlit as st
+import pandas as pd
 import numpy as np
-from streamlit_folium import st_folium
-import folium
-from folium import plugins
-from shapely.geometry import Polygon
+import pickle
+import json
 import geopandas as gpd
+import folium
+from shapely.geometry import Polygon
+from streamlit_folium import st_folium
+from folium import plugins
 
-# Load trained model
-with open('police_prediction_model.pkl', 'rb') as file:
-    model = pickle.load(file)
+# Load trained model & encoder (SINGLE PICKLE FILE)
+with open("police_model.pkl", "rb") as model_file:
+   rf_model, encoder = pickle.load(model_file)
 
-# Streamlit App
-st.set_page_config(page_title="Police Requirement Prediction", layout="centered")
+# Streamlit UI
+st.title(" Police Deployment Predictor")
+st.write("Select an area on the map and enter event details to estimate police personnel requirements.")
 
-st.title("Police Requirement Prediction App")
-st.markdown("#### Estimate the number of policemen needed based on area, gates, population, and security risk.")
-
-# Map for area selection
-st.subheader("Select Area on Map")
-st.write("Draw a polygon to calculate the area in square meters.")
-
+# Interactive Folium Map
 m = folium.Map(location=[13.0827, 80.2707], zoom_start=15)
 draw = plugins.Draw(
     export=True,
     position='topleft',
-    draw_options={
-        'polyline': False,
-        'rectangle': False,
-        'circle': False,
-        'marker': False,
-        'polygon': True,
-    },
+    draw_options={'polyline': False, 'rectangle': False, 'circle': False, 'marker': False, 'polygon': True},
     edit_options={'edit': True}
 )
 draw.add_to(m)
-
 map_data = st_folium(m, width=700, height=500)
 
+# Calculate selected area
 area_sq_m = 0
 if map_data and map_data['last_active_drawing']:
     geometry = map_data['last_active_drawing']['geometry']['coordinates'][0]
@@ -45,25 +36,59 @@ if map_data and map_data['last_active_drawing']:
     gdf = gpd.GeoDataFrame(index=[0], geometry=[polygon], crs="EPSG:4326")
     gdf = gdf.to_crs(epsg=3857)
     area_sq_m = gdf.geometry.area.iloc[0]
-    st.success(f"Area Selected: {area_sq_m:.2f} square meters")
+    st.success(f" Area Selected: **{area_sq_m:.2f} square meters**")
 
-# User Input Fields
-no_of_gates = st.number_input("Enter Number of Gates", min_value=0, step=1, format="%d")
-population = st.number_input("Enter Population", min_value=0, step=1, format="%d")
-security_risk = st.selectbox(
-    "Select Security Risk Level", [1, 2, 3], format_func=lambda x: {1: 'Low', 2: 'Medium', 3: 'High'}[x]
-)
+# Dropdown options
+vip_options = ["None", "VIP", "VVIP"]
+complexity_options = ["Low", "Medium", "High"]
+risk_options = ["Low", "Medium", "High"]
 
-# Population Density Calculation
-population_density = population / area_sq_m if area_sq_m > 0 else 0
+# User inputs
+attendees = st.number_input(" Number of Attendees", min_value=1, value=100)
+vip_level = st.selectbox("VIP Level", vip_options)
+venue_complexity = st.selectbox(" Venue Complexity", complexity_options)
+risk_level = st.selectbox("Risk Level", risk_options)
 
-# Predict Button
-if st.button("🔍 Predict Number of Policemen"):
-    if area_sq_m <= 0:
-        st.error("Please select a valid area on the map.")
+# Predict function
+def predict_police_requirements(area, attendees, vip_level, venue_complexity, risk_level):
+    # Encode categorical inputs
+    categorical_input = pd.DataFrame([[vip_level, venue_complexity, risk_level]], 
+                                     columns=["vip_factor", "venue_factor", "risk_factor"])
+    
+    encoded_input = [
+        area,
+        attendees,
+        encoder['vip_factor'].transform([vip_level])[0],
+        encoder['venue_factor'].transform([venue_complexity])[0],
+        encoder['risk_factor'].transform([risk_level])[0]
+    ]
+    
+    input_data = np.array([encoded_input])
+    predicted_counts = rf_model.predict(input_data)[0]
+
+    return {
+        "Deputy Commissioners (DC)": int(predicted_counts[0]),
+        "Assistant Commissioners (AC)": int(predicted_counts[1]),
+        "Inspectors": int(predicted_counts[2]),
+        "Sub-Inspectors (SIs)": int(predicted_counts[3]),
+        "Officers (ORS)": int(predicted_counts[4]),
+        "Armed Reserves (AR)": int(predicted_counts[5]),
+        "Total Personnel": round(predicted_counts.sum())
+    }
+
+# Predict button
+if st.button(" Predict Personnel Requirement"):
+    if area_sq_m == 0:
+        st.error(" Please select an area on the map first.")
     else:
-        input_features = np.array([[area_sq_m, no_of_gates, population_density, security_risk]])
-        prediction = model.predict(input_features)
-        st.success(f" Estimated Number of Policemen Needed: {int(round(prediction[0]))}")
+        result = predict_police_requirements(area_sq_m, attendees, vip_level, venue_complexity, risk_level)
+        
+        # Display results in a table
+        st.subheader(" Prediction Results")
+        # st.write(f"For an event with **{attendees} attendees**, VIP Level **{vip_level}**, Venue Complexity **{venue_complexity}**, and Risk Level **{risk_level}**, the estimated police personnel required is:")
 
-st.markdown("---")
+        df_result = pd.DataFrame(list(result.items()), columns=["Role", "Count"])
+        st.table(df_result)
+
+        # Highlight total personnel
+        st.metric(label=" Total Personnel Required", value=result["Total Personnel"])
